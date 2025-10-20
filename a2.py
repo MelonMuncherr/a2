@@ -7,11 +7,6 @@ import numpy as np
 from numpy import ndarray
 import matplotlib.pyplot as plt
 
-# details
-__author__ = "Christopher Dowling"
-__email__ = "c.dowling1@uq.edu.au"
-__date__ = "<insert date here>"
-
 
 """
     Task 1 Acceleration Rule:

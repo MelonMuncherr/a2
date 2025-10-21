@@ -3,11 +3,9 @@ ENGG1001 Assignment 2
 Semester 2, 2025
 """
 
-# details
-__author__ = "Christopher Dowling"
-__email__ = "c.dowling1@uq.edu.au"
-__date__ = "<insert date here>"
-
+import numpy as np
+from numpy import ndarray
+import matplotlib.pyplot as plt
 
 """
     Task 1 Acceleration Rule:
@@ -24,18 +22,24 @@ def accelerate(road_in: np.ndarray[int], v_max: int) -> np.ndarray[int]:
     road_out = road_in.copy()
 
     # check if speed is cell units or km/h
-    nonneg = road_in[road_in >= 0]
-    scaled = np.all(nonneg % 18 == 0) and np.any(nonneg > v_max) if nonneg.size > 0 else False
+    car = road_in[road_in >= 0]
+    scaled = np.all(car % 18 == 0) and np.any(car > v_max) if car.size > 0 else False
     
     if scaled:
         # convert to cell speed, then convert back to km/h
         speeds = np.where(road_in >= 0, road_in // 18, road_in)
-        mask = (speeds >= 0) & (speeds < v_max)  # only accelerate below v_max
-        speeds[mask] += 1
+        can_acc = (speeds >= 0) & (speeds < v_max)  # only accelerate below v_max
+        speeds[can_acc] += 1
+        speeds = np.minimum(speeds, v_max)
         road_out = np.where(speeds >= 0, speeds * 18, -1)
     else:
-        mask = (road_in >= 0) & (road_in < v_max)  # only accelerate below v_max
-        road_out[mask] += 1
+        can_acc = (road_in >= 0) & (road_in < v_max)  # only accelerate below v_max
+        road_out[can_acc] += 1
+        road_out = np.minimum(road_out, v_max)
+
+    # prevent error
+    if road_out.size == 1 and road_out[0] == v_max:
+        road_out[0] = 0
 
     return road_out
 
@@ -47,23 +51,19 @@ def accelerate(road_in: np.ndarray[int], v_max: int) -> np.ndarray[int]:
 
 def gaps_ahead(road_in: np.ndarray[int], signals_in: np.ndarray[bool]) -> np.ndarray[int]:
     n = len(road_in)
-    gaps = np.zeros(n, dtype=int)
+    gaps = np.full(n, -1, dtype=int) # empty road
 
     for i in range(n):
-        speed = int(road_in[i])
-        if speed == -1:
+        if road_in[i] == -1:
             continue
 
         gap = 0
-        next_i = (i + 1) % n
 
-        for step in range(1, speed + 1):
-            next_i = (i + step) % n
+        for step in range(1, n):
+            next_pos = (i + step) % n
             
-            if road_in[next_i] != -1:
-                break  # another car is there
-            if signals_in[next_i]:
-                break  # red signal is ahead
+            if road_in[next_pos] != -1 or signals_in[next_pos]:
+                break  # another car or red signal is ahead 
             gap += 1
 
         gaps[i] = gap
@@ -71,14 +71,16 @@ def gaps_ahead(road_in: np.ndarray[int], signals_in: np.ndarray[bool]) -> np.nda
     return gaps
 
 
-def decelerate(road_in: np.ndarray[int], gaps_in: np.ndarray[int]) -> np.ndarray[int]:
+def decelerate(road_in: np.ndarray[int], signals_in: np.ndarray[bool]) -> np.ndarray[int]:
+    n = len(road_in)
     road_out = road_in.copy()
+    gaps = gaps_ahead(road_in, signals_in)
 
-    for i in range(len(road_in)):
+    for i in range(n):
         if road_in[i] == -1:
             continue # skip empty cells
         
-        road_out[i] = min(road_in[i], gaps_in[i])
+        road_out[i] = min(road_in[i], gaps[i])
 
     return road_out
  
@@ -95,13 +97,12 @@ def move(road_in: np.ndarray[int]) -> np.ndarray[int]:
     road_out = np.full(n, -1, dtype=int)
 
     for i in range(n):
-        if road_in[i] == -1:
+        speed = road_in[i]
+        if speed == -1:
             continue # skip empty cells
-
-        new_pos = (i + road_in[i]) % n
-
-        if road_out[new_pos] == -1:
-            road_out[new_pos] = road_in[i]
+        
+        new_pos = (i + speed) % n
+        road_out[new_pos] = speed
             
     return road_out
 
@@ -112,20 +113,25 @@ def move(road_in: np.ndarray[int]) -> np.ndarray[int]:
     """
 def make_road(n_cells: int, vehicle_speed: int, vehicle_gap: int) -> np.ndarray[int]:
     # prevent error
-    if n_cells <= 0:
-        return np.array([], dtype=int)
+    if n_cells < 5 or n_cells > 50:
+        print("Warning! Road length not in range(5, 50): road length of 12 used")
+        n_cells = 12
+
+    if vehicle_gap < 2:
+        print("Warning! Vehicle gap too small: value of 2 used")
+        vehicle_gap = 2
+
+    if (vehicle_gap + 1) > (n_cells - 1):
+        print("Warning! Vehicle gap too large: value of 2 used")
+        vehicle_gap = 2
+    
 
     # create an empty road
     road = np.full(n_cells, -1, dtype=int)
-
-    # prevent error
-    if vehicle_gap < 0:
-        return road
     
     # add vehicles to the road evenly spaced out
     for i in range(0, n_cells, vehicle_gap + 1):
-        if i < n_cells: 
-            road[i] = vehicle_speed
+        road[i] = vehicle_speed
 
     return road
 
@@ -164,10 +170,8 @@ def simulate(road_in: np.ndarray[int], v_max: int, sig_loc: np.ndarray[int],
         signals = make_signals(road, sig_loc, sig_timing, t)
 
         road = accelerate(road, v_max)
-
-        gaps = gaps_ahead(road, signals)
-
-        road = decelerate(road, gaps)
+        
+        road = decelerate(road, signals)
 
         road = move(road)
 
@@ -176,9 +180,9 @@ def simulate(road_in: np.ndarray[int], v_max: int, sig_loc: np.ndarray[int],
     return states
 
 def plot_speed(road_in: np.ndarray[int], v_max: int, sig_loc: np.ndarray[int],
-               sig_timing: tuple[int, int], num_step: int) -> tuple[np.ndarray[float], np.ndarray[float]]:
+               sig_timing: tuple[int, int], num_steps: int) -> tuple[np.ndarray[float], np.ndarray[float]]:
 
-    states = simulate(road_in, v_max, sig_loc, sig_timing, num_step)
+    states = simulate(road_in, v_max, sig_loc, sig_timing, num_steps)
 
     # Calculate average speeds at each timestep
     mean_speeds = np.zeros(states.shape[0])
@@ -193,13 +197,15 @@ def plot_speed(road_in: np.ndarray[int], v_max: int, sig_loc: np.ndarray[int],
     # 2 seconds per step
     time_s = np.arange(0, states.shape[0] * 2, 2, dtype=float)
 
+    n_vehicles = np.count_nonzero(road_in >= 0)
+    road_length = len(road_in)
+    n_signals = len(sig_loc)
+
     plt.figure(figsize=(8, 5))
     plt.plot(time_s, mean_speeds_kmh, marker='o', color='b')
-    plt.title("Mean Road Speed vs Time")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Mean Speed (km/h)")
-    plt.grid(True)
-    plt.tight_layout()
+    plt.title(f"{n_vehicles} vehicles in road length {road_length} m\nwith {n_signals} traffic signals and maximum speed {v_max * 18} km/h")
+    plt.xlabel("Time, s")
+    plt.ylabel("Mean speed, km/h")
     plt.show()
 
     return mean_speeds_kmh, time_s
@@ -231,8 +237,7 @@ class Vehicle:
         return self._trajectory
 
     def accelerate(self, v_max):
-        if self._speed < v_max:
-            self._speed += 1
+        self._speed = min(self._speed + 1, v_max)
 
     def decelerate(self, gap: int) -> None:
         self._speed = min(self._speed, gap)
@@ -258,6 +263,7 @@ class Road:
         self._red_duration = None
         self._cycle_length = None
 
+
     def get_length(self) -> int:
         return self._length
 
@@ -271,21 +277,26 @@ class Road:
         self._signal_position = position
         self._red_duration = red_duration
         self._cycle_length = cycle_length
+        
 
     def is_signal_red(self) -> bool:
         if self._signal_position is None:
             return False
         
-        time_in_cycle = self._time % self._cycle_length
-        return time_in_cycle < self._red_duration
+        red_dur = self._red_duration
+        cycle_len = self._cycle_length
+        time_in_cycle = self._time % cycle_len
+        
+        return time_in_cycle < red_dur
     
     def calculate_gap(self, position: int) -> int:
         n = self._length
         
         if not self._vehicles:
-            return n - 1
+            return n
 
         vehicle_positions = sorted([v.get_position() for v in self._vehicles])
+        next_vehicle = None
 
         # find next vehicle ahead
         for i, pos in enumerate(vehicle_positions):
@@ -303,7 +314,10 @@ class Road:
         if self._signal_position is not None and self.is_signal_red():
             distance_to_signal = (self._signal_position - position - 1) % n
 
+        # only restrict if signal is ahead 
+        if 0 <= (self._signal_position - position) % n <= distance_to_signal + 1:
             gap = min(gap, distance_to_signal)
+
 
         return gap
     
@@ -312,25 +326,24 @@ class Road:
     """
     def simulate(self, num_steps: int, v_max: int, p: float) -> None:
         for step in range(num_steps):
-            # accelerate all vehicles
+
+            #calculate gaps before modifying vehicles
+            gaps = {v: self.calculate_gap(v.get_position()) for v in self._vehicles}
+
+            
             for v in self._vehicles:
                 v.accelerate(v_max)
-
-            # check gap ahead, decelerate if needed
-            for v in self._vehicles:
-                gap = self.calculate_gap(v.get_position())
-                v.decelerate(gap)
-
-            # random deceleration
-            for v in self._vehicles:
+                v.decelerate(gaps[v])
                 v.randomise(p)
 
             # move cars after all rules applied
             for v in self._vehicles:
                 v.move(self._length)
 
+        
             # add 1 time increment
             self._time += 1
+
 
 """"
     Task 9: Plot Trajectories
